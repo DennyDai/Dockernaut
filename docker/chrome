@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export DISPLAY="${DISPLAY:-:1}"
+export HOME="${HOME:-/home/vm}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+
+exec /usr/bin/google-chrome-stable \
+  --user-data-dir="${CHROME_USER_DATA_DIR:-${HOME}/.chrome-cdp}" \
+  --remote-debugging-address="${CHROME_REMOTE_DEBUGGING_ADDRESS:-0.0.0.0}" \
+  --remote-debugging-port="${CHROME_REMOTE_DEBUGGING_PORT:-9223}" \
+  --remote-allow-origins="*" \
+  --no-sandbox \
+  --no-first-run \
+  --no-default-browser-check \
+  --password-store=basic \
+  "$@"

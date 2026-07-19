@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="${1:-/home/vm/.agent/screenshots}"
+case "${root}" in
+  /home/vm/.agent/screenshots|/home/vm/.agent/screenshots/*) ;;
+  *)
+    printf 'Refusing to clear outside /home/vm/.agent/screenshots: %s\n' "${root}" >&2
+    exit 2
+    ;;
+esac
+
+rm -rf -- "${root}"
+mkdir -p /home/vm/.agent/screenshots
+printf '%s\n' /home/vm/.agent/screenshots

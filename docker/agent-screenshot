@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export DISPLAY="${DISPLAY:-:1}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+
+out="${1:-/home/vm/.agent/screenshots/current.png}"
+mkdir -p "$(dirname "${out}")"
+maim "${out}"
+printf '%s\n' "${out}"

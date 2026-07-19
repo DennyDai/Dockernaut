@@ -1,0 +1,23 @@
+services:
+  desktop-vm:
+    platform: linux/amd64
+    build:
+      context: ./docker
+      args:
+        VM_UID: ${VM_UID:-1000}
+        VM_GID: ${VM_GID:-1000}
+    hostname: desktop-vm
+    init: true
+    shm_size: 2gb
+    environment:
+      VM_PASSWORD: ${VM_PASSWORD:-vm}
+      VNC_PASSWORD: ${VNC_PASSWORD:-vm}
+      DESKTOP_GEOMETRY: ${DESKTOP_GEOMETRY:-1600x900}
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${SSH_PORT:-2222}:22"
+      - "${BIND_ADDR:-127.0.0.1}:${VNC_PORT:-5901}:5901"
+      - "${BIND_ADDR:-127.0.0.1}:${DESKTOP_PORT:-6080}:6080"
+      - "${BIND_ADDR:-127.0.0.1}:${CDP_PORT:-9222}:9222"
+    volumes:
+      - "${VM_HOME:-./homes/default}:/home/vm"
+    restart: unless-stopped

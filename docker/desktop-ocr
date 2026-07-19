@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export DISPLAY="${DISPLAY:-:1}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+
+if [[ "$#" -gt 0 ]]; then
+  image="$1"
+else
+  image="$(desktop-screenshot)"
+fi
+
+tesseract "${image}" stdout 2>/dev/null

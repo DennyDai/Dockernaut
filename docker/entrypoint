@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+VM_PASSWORD="${VM_PASSWORD:-vm}"
+VNC_PASSWORD="${VNC_PASSWORD:-${VM_PASSWORD}}"
+DESKTOP_GEOMETRY="${DESKTOP_GEOMETRY:-1600x900}"
+VM_UID="$(id -u vm)"
+VM_GID="$(id -g vm)"
+VM_RUNTIME_DIR="/run/user/${VM_UID}"
+
+printf 'vm:%s\n' "${VM_PASSWORD}" | chpasswd
+ssh-keygen -A
+
+install -d -o "${VM_UID}" -g "${VM_GID}" -m 0755 /home/vm
+install -d -o "${VM_UID}" -g "${VM_GID}" -m 0700 /home/vm/.vnc
+install -d -o "${VM_UID}" -g "${VM_GID}" -m 0700 /home/vm/.chrome-cdp
+install -d -o "${VM_UID}" -g "${VM_GID}" -m 0755 /home/vm/Downloads
+install -d -o "${VM_UID}" -g "${VM_GID}" -m 0700 "${VM_RUNTIME_DIR}"
+install -d -m 1777 /tmp/.X11-unix
+install -d -m 1777 /tmp/.ICE-unix
+
+printf '%s\n' "${VNC_PASSWORD}" | tigervncpasswd -f >/home/vm/.vnc/passwd
+chown "${VM_UID}:${VM_GID}" /home/vm/.vnc/passwd
+chmod 0600 /home/vm/.vnc/passwd
+
+export DESKTOP_GEOMETRY VM_RUNTIME_DIR
+exec /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
