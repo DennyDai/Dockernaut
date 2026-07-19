@@ -1,2 +1,13 @@
 .env
 homes/
+agent/.venv/
+agent/targets.toml
+agent/__pycache__/
+agent/src/**/__pycache__/
+agent/tests/__pycache__/
+agent/.ruff_cache/
+agent/.pytest_cache/
+agent/src/*.egg-info/
+agent/build/
+agent/dist/
+.dockernaut/

@@ -1,0 +1,35 @@
+cache_dir = "~/.cache/dockernaut"
+
+[targets.desktop]
+prefer = ["vnc", "x11", "cdp"]
+
+[targets.desktop.ssh]
+host = "127.0.0.1"
+port = 2222
+user = "vm"
+password = "${VM_PASSWORD:-vm}"
+host_key_checking = "none"
+
+[targets.desktop.x11]
+ssh = "ssh"
+display = ":1"
+
+[targets.desktop.vnc]
+host = "127.0.0.1"
+port = 5901
+password = "${VNC_PASSWORD:-vm}"
+
+[targets.desktop.cdp]
+url = "http://127.0.0.1:9222"
+scope = "page"
+
+# Optional Windows target; install with `uv sync --extra rdp`.
+#[targets.windows.rdp]
+#url = "rdp+ntlm-password://DOMAIN\\user:password@host"
+#width = 1280
+#height = 720
+
+# Optional Android target; install adb and set a serial when several devices are attached.
+#[targets.android.adb]
+#serial = "emulator-5554"
+#scrcpy = "scrcpy"

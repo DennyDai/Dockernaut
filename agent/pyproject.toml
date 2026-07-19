@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dockernaut-agent"
+version = "0.1.0"
+description = "Capability-routed computer control over MCP"
+requires-python = ">=3.11,<3.14"
+dependencies = ["mcp>=1.10,<2"]
+
+[project.optional-dependencies]
+rdp = ["aardwolf==0.2.13"]
+
+[project.scripts]
+dockernaut = "dockernaut.cli:main"
+dockernaut-mcp = "dockernaut.mcp_server:main"
+
+[project.entry-points."dockernaut.adapters"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.unittest]
+start-directory = "tests"
