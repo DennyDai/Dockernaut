@@ -82,6 +82,13 @@ COPY desktop-screenshot /usr/local/bin/desktop-screenshot
 COPY desktop-ocr /usr/local/bin/desktop-ocr
 COPY agent-screenshot /usr/local/bin/agent-screenshot
 COPY agent-clear-screenshots /usr/local/bin/agent-clear-screenshots
+COPY agent-observe /usr/local/bin/agent-observe
+COPY agent-click /usr/local/bin/agent-click
+COPY agent-mouse /usr/local/bin/agent-mouse
+COPY agent-run /usr/local/bin/agent-run
+COPY agent-type /usr/local/bin/agent-type
+COPY agent-key /usr/local/bin/agent-key
+COPY agent-clear /usr/local/bin/agent-clear
 COPY entrypoint /usr/local/bin/desktop-vm-entrypoint
 COPY supervisord.conf /etc/supervisor/conf.d/desktop-vm.conf
 COPY desktop-env.sh /etc/profile.d/desktop-env.sh
@@ -93,6 +100,13 @@ RUN chmod 0755 \
       /usr/local/bin/desktop-ocr \
       /usr/local/bin/agent-screenshot \
       /usr/local/bin/agent-clear-screenshots \
+      /usr/local/bin/agent-observe \
+      /usr/local/bin/agent-click \
+      /usr/local/bin/agent-mouse \
+      /usr/local/bin/agent-run \
+      /usr/local/bin/agent-type \
+      /usr/local/bin/agent-key \
+      /usr/local/bin/agent-clear \
       /usr/local/bin/start-chrome \
       /usr/local/bin/desktop-vm-entrypoint \
       /etc/profile.d/desktop-env.sh

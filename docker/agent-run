@@ -1,0 +1,302 @@
+#!/usr/bin/env python3
+import argparse
+import csv
+import io
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+HOME = Path(os.environ.get("HOME", "/home/vm"))
+SCREENSHOT = HOME / ".agent" / "screenshots" / "current.png"
+
+
+class ActionError(RuntimeError):
+    pass
+
+
+def command(args, capture=False):
+    result = subprocess.run(
+        args,
+        text=True,
+        stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode:
+        detail = result.stderr.strip() or result.stdout.strip() or f"exit {result.returncode}"
+        raise ActionError(f"{' '.join(args)}: {detail}")
+    return result.stdout.strip() if capture else ""
+
+
+def capture_screen(path=SCREENSHOT):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    command(["maim", str(path)])
+    return path
+
+
+def tokenized(text):
+    return re.findall(r"[^\W_]+", text.casefold(), flags=re.UNICODE)
+
+
+def ocr_words(path):
+    tsv = command(["tesseract", str(path), "stdout", "tsv"], capture=True)
+    words = []
+    for row in csv.DictReader(io.StringIO(tsv), delimiter="\t"):
+        text = (row.get("text") or "").strip()
+        if not text or row.get("level") != "5":
+            continue
+        try:
+            base = {
+                "source_text": text,
+                "confidence": float(row["conf"]),
+                "left": int(row["left"]),
+                "top": int(row["top"]),
+                "width": int(row["width"]),
+                "height": int(row["height"]),
+                "line": (row["page_num"], row["block_num"], row["par_num"], row["line_num"]),
+            }
+            for token in tokenized(text):
+                words.append({**base, "text": token, "norm": token})
+        except (KeyError, TypeError, ValueError):
+            continue
+    return words
+
+
+def text_matches(words, text, contains=False):
+    targets = tokenized(text)
+    if not targets:
+        raise ActionError("text locator is empty")
+    matches = []
+    width = len(targets)
+    for index in range(len(words) - width + 1):
+        group = words[index:index + width]
+        if width > 1 and any(item["line"] != group[0]["line"] for item in group[1:]):
+            continue
+        values = [item["norm"] for item in group]
+        found = all(target in value for target, value in zip(targets, values)) if contains else values == targets
+        if not found:
+            continue
+        left = min(item["left"] for item in group)
+        top = min(item["top"] for item in group)
+        right = max(item["left"] + item["width"] for item in group)
+        bottom = max(item["top"] + item["height"] for item in group)
+        matches.append({
+            "text": " ".join(item["text"] for item in group),
+            "x": round((left + right) / 2),
+            "y": round((top + bottom) / 2),
+            "box": {"left": left, "top": top, "width": right - left, "height": bottom - top},
+            "confidence": round(sum(item["confidence"] for item in group) / len(group), 1),
+        })
+    return matches
+
+
+def locator_options(value):
+    if isinstance(value, str):
+        return {"text": value}
+    if not isinstance(value, dict) or not isinstance(value.get("text"), str):
+        raise ActionError("text locator must be a string or an object containing text")
+    return value
+
+
+def locator_region(value):
+    if value is None:
+        return None
+    if not isinstance(value, list) or len(value) != 4:
+        raise ActionError("region must be [left, top, right, bottom]")
+    left, top, right, bottom = map(int, value)
+    if right <= left or bottom <= top:
+        raise ActionError("region right/bottom must be greater than left/top")
+    return [left, top, right, bottom]
+
+
+def locate_text(value):
+    options = locator_options(value)
+    text = options["text"]
+    timeout = float(options.get("timeout", 3))
+    interval = float(options.get("interval", 0.25))
+    nth = int(options.get("nth", 0))
+    contains = bool(options.get("contains", False))
+    region = locator_region(options.get("region"))
+    deadline = time.monotonic() + max(0, timeout)
+    last_words = []
+    while True:
+        path = capture_screen()
+        last_words = ocr_words(path)
+        all_matches = text_matches(last_words, text, contains)
+        if region:
+            left, top, right, bottom = region
+            matches = [match for match in all_matches if left <= match["x"] <= right and top <= match["y"] <= bottom]
+        else:
+            matches = all_matches
+        index = nth if nth >= 0 else len(matches) + nth
+        if 0 <= index < len(matches):
+            result = matches[index]
+            result["matches"] = len(matches)
+            result["total_matches"] = len(all_matches)
+            if region:
+                result["region"] = region
+            return result
+        if time.monotonic() >= deadline:
+            visible = " ".join(word["text"] for word in last_words)
+            scope = f" within region {region}" if region else ""
+            raise ActionError(f"text not found: {text!r}{scope}; OCR saw: {visible[:500]!r}")
+        time.sleep(max(0.05, interval))
+
+
+def mouse(action, *values):
+    command(["agent-mouse", action, *map(str, values)])
+
+
+def pair(value, name):
+    if not isinstance(value, list) or len(value) < 2:
+        raise ActionError(f"{name} expects [x, y]")
+    return int(value[0]), int(value[1])
+
+
+def observe(ocr=True):
+    args = ["agent-observe"]
+    if ocr:
+        args.append("--ocr")
+    return json.loads(command(args, capture=True))
+
+
+def execute(action):
+    if not isinstance(action, dict) or len(action) != 1:
+        raise ActionError("each action must be an object with exactly one operation")
+    name, value = next(iter(action.items()))
+
+    if name == "move":
+        x, y = pair(value, name)
+        mouse("move", x, y)
+        return {"x": x, "y": y}
+    if name in ("click", "double_click", "right_click"):
+        x, y = pair(value, name)
+        button = 3 if name == "right_click" else int(value[2]) if len(value) > 2 else 1
+        mouse("double-click" if name == "double_click" else "click", x, y, button)
+        return {"x": x, "y": y, "button": button}
+    if name == "drag":
+        if not isinstance(value, list) or len(value) != 4:
+            raise ActionError("drag expects [x1, y1, x2, y2]")
+        values = list(map(int, value))
+        mouse("drag", *values)
+        return {"from": values[:2], "to": values[2:]}
+    if name == "scroll":
+        if isinstance(value, str):
+            options = {"direction": value}
+        elif isinstance(value, dict):
+            options = value
+        else:
+            raise ActionError("scroll expects a direction or options object")
+        direction = options.get("direction")
+        if direction not in ("up", "down", "left", "right"):
+            raise ActionError("scroll direction must be up, down, left, or right")
+        args = [direction, int(options.get("amount", 3))]
+        if "x" in options or "y" in options:
+            if "x" not in options or "y" not in options:
+                raise ActionError("scroll requires both x and y")
+            args += ["--x", int(options["x"]), "--y", int(options["y"])]
+        mouse("scroll", *args)
+        return options
+    if name in ("click_text", "click_element"):
+        found = locate_text(value)
+        options = locator_options(value)
+        mouse("click", found["x"], found["y"], int(options.get("button", 1)))
+        return found
+    if name in ("assert_text", "wait_text"):
+        return locate_text(value)
+    if name == "type":
+        if not isinstance(value, str):
+            raise ActionError("type expects a string")
+        command(["agent-type", value])
+        return {"characters": len(value)}
+    if name in ("key", "hotkey"):
+        keys = value if isinstance(value, list) else [value]
+        if not keys or not all(isinstance(key, str) for key in keys):
+            raise ActionError(f"{name} expects a key string or list of key strings")
+        command(["agent-key", *keys])
+        return {"keys": keys}
+    if name == "wait":
+        seconds = float(value)
+        if seconds < 0:
+            raise ActionError("wait cannot be negative")
+        time.sleep(seconds)
+        return {"seconds": seconds}
+    if name == "observe":
+        options = value if isinstance(value, dict) else {}
+        return observe(bool(options.get("ocr", value is True)))
+    if name == "screenshot":
+        path = Path(value) if isinstance(value, str) else SCREENSHOT
+        capture_screen(path)
+        return {"screenshot": str(path)}
+    if name == "clear":
+        command(["agent-clear"])
+        return {"cleared": True}
+    raise ActionError(f"unknown action: {name}")
+
+
+def load_script(args):
+    sources = sum(value is not None for value in (args.script, args.file))
+    if sources > 1:
+        raise ActionError("provide either an inline script or --file")
+    if args.file:
+        raw = Path(args.file).read_text()
+    elif args.script and args.script != "-":
+        raw = args.script
+    else:
+        raw = sys.stdin.read()
+    if not raw.strip():
+        raise ActionError("no action script provided")
+    payload = json.loads(raw)
+    if isinstance(payload, list):
+        return payload, False
+    if isinstance(payload, dict) and isinstance(payload.get("actions"), list):
+        return payload["actions"], bool(payload.get("observe_after", False))
+    raise ActionError("script must be an action list or an object containing actions")
+
+
+def main():
+    os.environ.setdefault("DISPLAY", ":1")
+    os.environ.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+    parser = argparse.ArgumentParser(description="Run a batch of human desktop actions from JSON.")
+    parser.add_argument("script", nargs="?", help="Inline JSON, or - to read stdin")
+    parser.add_argument("--file", help="Read JSON from a file")
+    args = parser.parse_args()
+
+    try:
+        actions, observe_after = load_script(args)
+    except Exception as error:
+        print(json.dumps({"ok": False, "error": {"type": type(error).__name__, "message": str(error)}}))
+        raise SystemExit(2)
+
+    completed = []
+    for index, action in enumerate(actions):
+        started = time.monotonic()
+        try:
+            result = execute(action)
+            completed.append({"step": index, "action": action, "result": result, "elapsed_ms": round((time.monotonic() - started) * 1000)})
+        except Exception as error:
+            try:
+                failure_observation = observe(True)
+            except Exception as observation_error:
+                failure_observation = {"error": str(observation_error)}
+            print(json.dumps({
+                "ok": False,
+                "failed_step": index,
+                "action": action,
+                "error": {"type": type(error).__name__, "message": str(error)},
+                "completed": completed,
+                "observation": failure_observation,
+            }, indent=2))
+            raise SystemExit(1)
+
+    output = {"ok": True, "completed": completed}
+    if observe_after:
+        output["observation"] = observe(True)
+    print(json.dumps(output, indent=2))
+
+
+if __name__ == "__main__":
+    main()

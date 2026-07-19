@@ -46,39 +46,87 @@ Prefer SSH and CDP over `docker exec`; they exercise the same interfaces intende
 
 ## Desktop GUI control
 
-For non-browser GUI work, take a screenshot first. noVNC exposes the desktop as pixels, so screenshot inspection is the primary way to understand visible state before clicking.
+For non-browser GUI work, run an observe-act-observe loop. noVNC exposes the desktop as pixels, so screenshot inspection is the primary way to understand visible state before clicking.
 
-Dump a screenshot into the mounted home so the host-side agent can read it directly:
+Observe the current desktop:
 
 ```bash
-ssh -p "${SSH_PORT:-2222}" vm@"${BIND_ADDR:-127.0.0.1}" 'agent-screenshot'
+ssh -p "${SSH_PORT:-2222}" vm@"${BIND_ADDR:-127.0.0.1}" 'agent-observe --ocr'
 ```
 
-Default in-container output:
+`agent-observe` writes a screenshot to:
 
 ```text
 /home/vm/.agent/screenshots/current.png
 ```
 
-Default host-side path:
+Host-side agents can read it at:
 
 ```text
 ${VM_HOME:-./homes/default}/.agent/screenshots/current.png
 ```
 
-After reading the image, clear the screenshot dropbox:
+Act with small, explicit human input operations:
 
 ```bash
-ssh -p "${SSH_PORT:-2222}" vm@"${BIND_ADDR:-127.0.0.1}" 'agent-clear-screenshots'
+agent-mouse move 800 450
+agent-mouse click 45 13
+agent-mouse double-click 300 200
+agent-mouse click 300 200 3
+agent-mouse drag 825 570 1100 720 --duration-ms 700
+agent-mouse scroll down 5 --x 800 --y 450
+agent-mouse down 1
+agent-mouse up 1
+agent-type whoami
+agent-key Return
+agent-key ctrl+l
 ```
 
-Use `desktop-screenshot <path>` for one-off captures outside the shared dropbox. Run OCR on a screenshot when exact visible text matters:
+`agent-mouse` provides generic move, click, double-click, right-click through button `3`, drag, scroll, button-down, and button-up primitives. Pointer travel follows a randomized curved, eased path with slight timing variation and always lands on the exact requested coordinate before acting; this applies when moving between successive clicks as well as during drags. `--duration-ms` overrides movement duration when a task needs deliberate speed. `agent-click X Y [BUTTON]` remains as a shorthand for `agent-mouse click`. `agent-type TEXT` enters text and `agent-key KEY...` sends keys or shortcuts.
+
+Then observe again before the next action. Use `wmctrl -lG`, `xwininfo -root -tree`, or the `windows` field from `agent-observe` to derive coordinates from window geometry rather than guessing. Do not add app-specific action commands when the operation can be expressed as ordinary pointer or keyboard input.
+
+For several known actions, use `agent-run` instead of round-tripping after every step. It accepts an AutoHotkey-like declarative JSON sequence while retaining the humanized mouse behavior:
 
 ```bash
-ssh -p "${SSH_PORT:-2222}" vm@"${BIND_ADDR:-127.0.0.1}" 'desktop-ocr /home/vm/.agent/screenshots/current.png'
+agent-run '[
+  {"click":[45,13]},
+  {"click_text":{"text":"Terminal Emulator","timeout":3}},
+  {"type":"whoami"},
+  {"key":"Return"},
+  {"wait_text":{"text":"vm","timeout":2}}
+]'
 ```
 
-Use `xdotool` for pointer and keyboard actions, `wmctrl` for window management, and `xwininfo -root -tree` to inspect window placement. Prefer screenshots plus explicit coordinates for desktop-only apps. Prefer CDP for browser pages and SSH for shell output whenever those semantic interfaces are available.
+Supported operations include `move`, `click`, `double_click`, `right_click`, `drag`, `scroll`, `click_text`, `click_element`, `assert_text`, `wait_text`, `type`, `key`, `hotkey`, `wait`, `observe`, `screenshot`, and `clear`. Examples:
+
+```json
+[
+  {"hotkey":"ctrl+a"},
+  {"key":"BackSpace"},
+  {"click_element":{"text":"XXX","contains":true}},
+  {"right_click":[500,300]},
+  {"drag":[825,542,1100,700]}
+]
+```
+
+`click_text` and `click_element` use screenshot OCR to locate visible text, then move along a randomized path and click its center. Locator options include `text`, `contains`, `nth`, `region`, `timeout`, `interval`, and `button`. `region` is `[left, top, right, bottom]` in native desktop coordinates and keeps only matches whose center falls inside it:
+
+```json
+{"click_text":{"text":"Desktop","region":[900,400,1200,800]}}
+```
+
+Locator results report both `matches` inside the region and `total_matches` across the screen. Combine `region` with `nth` when the constrained area still contains repeated labels.
+
+The runner stops on the first failed action and returns structured JSON containing `failed_step`, the failed action, the error, completed steps, and a fresh observation with screenshot path, OCR, active window, pointer, and window geometry. Use that observation to correct the sequence. A successful batch returns every action result and elapsed time; set top-level `observe_after` to `true` when a final screenshot/OCR observation is needed.
+
+After reading screenshots, clear the handoff directory:
+
+```bash
+ssh -p "${SSH_PORT:-2222}" vm@"${BIND_ADDR:-127.0.0.1}" 'agent-clear'
+```
+
+Use `desktop-screenshot <path>` for one-off captures outside the shared dropbox. Run `desktop-ocr <path>` on a screenshot when exact visible text matters. Prefer CDP for browser pages and SSH for shell output whenever those semantic interfaces are available.
 
 ## Human desktop access
 
