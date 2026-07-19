@@ -1,13 +1,21 @@
+import json
 import os
 import random
 import tempfile
 import unittest
 from pathlib import Path
 
+from dockernaut.cli import load_json
 from dockernaut.config import ConfigError, load_config
 from dockernaut.motion import trajectory
 from dockernaut.sequence import normalize, run_sequence
 from dockernaut.vision import Word, find_text
+
+
+class CliTests(unittest.TestCase):
+    def test_long_inline_json_is_not_treated_as_a_path(self):
+        payload = {"steps": [{"type": "x" * 300}]}
+        self.assertEqual(load_json(json.dumps(payload)), payload)
 
 
 class ConfigTests(unittest.TestCase):

@@ -12,9 +12,12 @@ from .sequence import run_sequence
 def load_json(value: str) -> Any:
     if value == "-":
         return json.load(sys.stdin)
-    path = Path(value)
-    if path.is_file():
-        return json.loads(path.read_text())
+    try:
+        path = Path(value)
+        if path.is_file():
+            return json.loads(path.read_text())
+    except OSError:
+        pass
     return json.loads(value)
 
 
