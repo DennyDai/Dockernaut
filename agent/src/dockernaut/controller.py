@@ -48,13 +48,13 @@ class Controller:
         adapter = await self.router(target).select(Capability.CAPTURE)
         return await adapter.capture(), adapter.name
 
-    async def _ocr(self, target: str, frame: Frame):
+    async def _ocr(self, target: str, frame: Frame, psm: int | None = None):
         shell = None
         try:
             shell = await self.router(target).select(Capability.SHELL)
         except CapabilityError:
             pass
-        return await recognize(frame, shell)
+        return await recognize(frame, shell, psm)
 
     async def observe(self, target: str, ocr: bool = False) -> dict[str, Any]:
         frame, adapter_name = await self.capture(target)
@@ -87,15 +87,22 @@ class Controller:
         while True:
             frame = await desktop.capture()
             frame.save(self.config.cache_dir / target / "current.png")
-            words = await self._ocr(target, frame)
-            try:
-                match = find_text(words, options)
-                if click:
-                    action = "right_click" if int(options.get("button", 1)) == 3 else "click"
-                    await desktop.act(action, {"x": match["x"], "y": match["y"], "button": options.get("button", 1)})
-                return match
-            except ActionError as error:
-                last_error = error
+            attempts = [(None, options)]
+            if options.get("region") is not None:
+                regional = dict(options)
+                regional.setdefault("fuzzy", True)
+                attempts.append((6, regional))
+            for psm, locator_options in attempts:
+                words = await self._ocr(target, frame, psm)
+                try:
+                    match = find_text(words, locator_options)
+                    match["ocr_psm"] = psm or "auto"
+                    if click:
+                        action = "right_click" if int(options.get("button", 1)) == 3 else "click"
+                        await desktop.act(action, {"x": match["x"], "y": match["y"], "button": options.get("button", 1)})
+                    return match
+                except ActionError as error:
+                    last_error = error
             if time.monotonic() >= deadline:
                 raise ActionError(str(last_error))
             await asyncio.sleep(max(0.05, interval))

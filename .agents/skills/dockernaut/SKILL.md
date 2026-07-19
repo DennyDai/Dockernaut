@@ -106,13 +106,13 @@ Supported operations include `move`, `click`, `double_click`, `right_click`, `dr
 
 Coordinate pointer actions use randomized curved, eased trajectories and land exactly on the requested endpoint. This emulates ordinary pointer movement; it is not an anti-bot guarantee.
 
-OCR locators accept `text`, `contains`, `nth`, `region`, `timeout`, `interval`, and `button`. A region is `[left, top, right, bottom]` in native target coordinates:
+OCR locators accept `text`, `contains`, `fuzzy`, `similarity`, `nth`, `region`, `timeout`, `interval`, and `button`. A region is `[left, top, right, bottom]` in native target coordinates:
 
 ```json
 {"click_text":{"text":"Desktop","region":[900,400,1200,800],"nth":0}}
 ```
 
-Locator results report `matches` within the region and `total_matches` across the screen. Use a region and then `nth` to disambiguate repeated labels.
+Locator results report `matches` within the region and `total_matches` across the screen. Use a region and then `nth` to disambiguate repeated labels. When a full-screen OCR pass misses text inside an explicit region, Dockernaut automatically retries with a dense-text page segmentation mode and fuzzy token matching. Set `fuzzy` explicitly to override that fallback; `similarity` defaults to `0.8`.
 
 The runner stops at the first failure. It returns `failed_step`, the failed step, error type and message, completed results, and a fresh observation by default. Correct the remaining sequence from that observation; do not replay completed non-idempotent steps.
 

@@ -4,6 +4,7 @@ import io
 import re
 import shutil
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from typing import Any
 
 from .adapters.base import Adapter
@@ -48,10 +49,14 @@ def parse_tsv(tsv: str) -> list[Word]:
     return words
 
 
-async def recognize(frame: Frame, shell: Adapter | None = None) -> list[Word]:
+async def recognize(frame: Frame, shell: Adapter | None = None, psm: int | None = None) -> list[Word]:
+    arguments = ["stdin", "stdout"]
+    if psm is not None:
+        arguments += ["--psm", str(psm)]
+    arguments.append("tsv")
     if command := shutil.which("tesseract"):
         process = await asyncio.create_subprocess_exec(
-            command, "stdin", "stdout", "tsv",
+            command, *arguments,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -61,7 +66,10 @@ async def recognize(frame: Frame, shell: Adapter | None = None) -> list[Word]:
             raise ActionError(stderr.decode(errors="replace").strip())
         return parse_tsv(stdout.decode(errors="replace"))
     if shell:
-        code, stdout, stderr = await shell.shell("tesseract stdin stdout tsv", frame.png)
+        command_line = "tesseract stdin stdout"
+        if psm is not None:
+            command_line += f" --psm {psm}"
+        code, stdout, stderr = await shell.shell(command_line + " tsv", frame.png)
         if code:
             raise ActionError(stderr.decode(errors="replace").strip())
         return parse_tsv(stdout.decode(errors="replace"))
@@ -77,6 +85,10 @@ def find_text(words: list[Word], locator: str | dict[str, Any]) -> dict[str, Any
     if not wanted:
         raise ActionError("text locator is empty")
     contains = bool(options.get("contains", False))
+    fuzzy = bool(options.get("fuzzy", False))
+    similarity = float(options.get("similarity", 0.8))
+    if not 0 < similarity <= 1:
+        raise ActionError("similarity must be greater than 0 and at most 1")
     region = options.get("region")
     if region is not None:
         if not isinstance(region, list) or len(region) != 4:
@@ -91,8 +103,12 @@ def find_text(words: list[Word], locator: str | dict[str, Any]) -> dict[str, Any
         if size > 1 and any(word.line != group[0].line for word in group[1:]):
             continue
         seen = [word.token for word in group]
-        matched = all(target in value for target, value in zip(wanted, seen)) if contains else seen == wanted
-        if not matched:
+        exact = all(target in value for target, value in zip(wanted, seen)) if contains else seen == wanted
+        approximate = fuzzy and all(
+            SequenceMatcher(None, target, value).ratio() >= similarity
+            for target, value in zip(wanted, seen)
+        )
+        if not exact and not approximate:
             continue
         left = min(word.left for word in group)
         top = min(word.top for word in group)
@@ -103,6 +119,7 @@ def find_text(words: list[Word], locator: str | dict[str, Any]) -> dict[str, Any
             "text": " ".join(seen), "x": x, "y": y,
             "box": {"left": left, "top": top, "width": right - left, "height": bottom - top},
             "confidence": round(sum(word.confidence for word in group) / len(group), 1),
+            "match": "exact" if exact else "fuzzy",
         })
     all_matches = len(matches)
     if region is not None:

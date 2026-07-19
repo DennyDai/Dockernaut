@@ -65,6 +65,23 @@ class VisionTests(unittest.TestCase):
         self.assertEqual(match["matches"], 1)
         self.assertEqual(match["total_matches"], 2)
 
+    def test_fuzzy_region_recovers_minor_ocr_error(self):
+        words = [
+            self.word("ferminal", "ferminal", 20, 40),
+            self.word("Emulator", "emulator", 80, 40),
+            self.word("Terminal", "terminal", 700, 500, "2"),
+            self.word("Emulator", "emulator", 760, 500, "2"),
+        ]
+        match = find_text(words, {
+            "text": "Terminal Emulator",
+            "region": [0, 0, 220, 180],
+            "fuzzy": True,
+        })
+        self.assertEqual(match["match"], "fuzzy")
+        self.assertEqual(match["matches"], 1)
+        self.assertEqual(match["total_matches"], 2)
+
+
 
 class FakeController:
     def __init__(self, fail=None):
