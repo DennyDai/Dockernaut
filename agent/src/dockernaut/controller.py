@@ -11,6 +11,16 @@ from .vision import find_text, recognize, text_output
 
 _POINTER_ACTIONS = {"move", "click", "double_click", "right_click", "drag", "scroll"}
 _KEYBOARD_ACTIONS = {"type", "key", "hotkey"}
+_WINDOW_ACTIONS = {
+    "assert_window",
+    "close_window",
+    "focus_window",
+    "maximize_window",
+    "move_window",
+    "resize_window",
+    "restore_window",
+    "wait_window",
+}
 
 
 class Controller:
@@ -113,6 +123,12 @@ class Controller:
             return await self.locate(target, params, True)
         if action in {"assert_text", "wait_text"}:
             return await self.locate(target, params, False)
+        if action == "launch":
+            adapter = await self.router(target).select(Capability.APPLICATIONS)
+            return await adapter.act(action, params)
+        if action in _WINDOW_ACTIONS:
+            adapter = await self.router(target).select(Capability.WINDOWS)
+            return await adapter.act(action, params)
         if action in _POINTER_ACTIONS:
             adapter = await self.router(target).select(Capability.POINTER)
             return await adapter.act(action, params)

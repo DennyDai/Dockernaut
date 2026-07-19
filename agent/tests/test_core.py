@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from dockernaut.adapters.x11 import X11Adapter
 from dockernaut.cli import load_json
 from dockernaut.config import ConfigError, load_config
 from dockernaut.motion import trajectory
@@ -83,6 +84,41 @@ class VisionTests(unittest.TestCase):
 
 
 
+class FakeSSH:
+    def __init__(self):
+        self.commands = []
+
+    async def shell(self, command, stdin=None):
+        self.commands.append(command)
+        if "wmctrl -lG" in command:
+            return 0, b"0x01000003  0 10 20 800 600 desktop-vm Terminal - vm@desktop-vm\\n", b""
+        if "xdotool getactivewindow" in command:
+            return 0, str(int("0x01000003", 16)).encode(), b""
+        return 0, b"", b""
+
+
+class X11Tests(unittest.IsolatedAsyncioTestCase):
+    async def test_launches_application_without_visual_search(self):
+        ssh = FakeSSH()
+        adapter = X11Adapter("x11", {"display": ":1"}, ssh)
+        result = await adapter.act("launch", {"command": "xfce4-terminal"})
+        self.assertEqual(result["command"], "xfce4-terminal")
+        self.assertIn("nohup sh -lc xfce4-terminal", ssh.commands[-1])
+
+    async def test_focuses_window_by_title(self):
+        ssh = FakeSSH()
+        adapter = X11Adapter("x11", {"display": ":1"}, ssh)
+        result = await adapter.act("focus_window", {"title": "terminal"})
+        self.assertTrue(result["window"]["active"])
+        self.assertIn("wmctrl -ia 0x01000003", ssh.commands[-1])
+
+    async def test_optional_close_skips_missing_window(self):
+        adapter = X11Adapter("x11", {"display": ":1"}, FakeSSH())
+        result = await adapter.act("close_window", {"title": "Missing", "if_exists": True})
+        self.assertTrue(result["skipped"])
+
+
+
 class FakeController:
     def __init__(self, fail=None):
         self.fail = fail
@@ -103,6 +139,8 @@ class SequenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(normalize({"action": "click", "params": {"x": 1, "y": 2}}), ("click", {"x": 1, "y": 2}))
         self.assertEqual(normalize({"scroll": "down"}), ("scroll", {"direction": "down"}))
         self.assertEqual(normalize({"screenshot": True}), ("screenshot", {}))
+        self.assertEqual(normalize({"launch": "xfce4-terminal"}), ("launch", {"command": "xfce4-terminal"}))
+        self.assertEqual(normalize({"wait_window": "Terminal"}), ("wait_window", {"title": "Terminal"}))
 
     async def test_runs_steps_without_agent_round_trips(self):
         controller = FakeController()

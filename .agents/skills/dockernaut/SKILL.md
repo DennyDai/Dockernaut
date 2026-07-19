@@ -30,7 +30,7 @@ uv run dockernaut targets
 Each target may combine adapters. Typical capability routing:
 
 - CDP: Chrome DOM/accessibility control, page screenshots, page pointer and keyboard input.
-- X11 over SSH: Linux desktop screenshots, windows, pointer, and keyboard.
+- X11 over SSH: Linux application launch, window discovery/focus/close/geometry, desktop screenshots, pointer, and keyboard.
 - VNC: protocol-native desktop screenshots, pointer, and keyboard.
 - RDP: Windows framebuffer, pointer, and keyboard through optional `aardwolf`.
 - ADB: Android screenshot, pointer, keyboard, shell, and optional `scrcpy`.
@@ -83,7 +83,7 @@ uv run dockernaut browser desktop Runtime.evaluate '{"expression":"document.titl
 uv run dockernaut act desktop click '{"x":45,"y":13}'
 ```
 
-Prefer CDP for browser content and SSH for shell output. Use visual desktop control only when semantic interfaces do not cover the task.
+Prefer CDP for browser content, SSH for shell output, and X11 `launch`/window actions for Linux applications. Use OCR only for visible controls that those semantic interfaces cannot address. VNC is the compatibility fallback when X11 is unavailable.
 
 ## Batched actions
 
@@ -92,8 +92,8 @@ Use `dockernaut_run` or the CLI `run` command when the next operations are known
 ```bash
 uv run dockernaut run desktop '{
   "steps": [
-    {"click": [45, 13]},
-    {"click_text": {"text": "Terminal Emulator", "timeout": 3}},
+    {"launch": "xfce4-terminal"},
+    {"wait_window": {"title": "Terminal", "timeout": 3}},
     {"type": "whoami"},
     {"key": "Return"},
     {"wait_text": {"text": "vm", "timeout": 2}}
@@ -102,7 +102,7 @@ uv run dockernaut run desktop '{
 }'
 ```
 
-Supported operations include `move`, `click`, `double_click`, `right_click`, `drag`, `scroll`, `click_text`, `click_element`, `assert_text`, `wait_text`, `type`, `key`, `hotkey`, `wait`, `observe`, `screenshot`, `clear`, and Android `viewer`.
+Supported operations include semantic `launch`, `wait_window`, `assert_window`, `focus_window`, `close_window`, `move_window`, `resize_window`, `maximize_window`, and `restore_window`; visual `move`, `click`, `double_click`, `right_click`, `drag`, `scroll`, `click_text`, `click_element`, `assert_text`, and `wait_text`; plus `type`, `key`, `hotkey`, `wait`, `observe`, `screenshot`, `clear`, and Android `viewer`.
 
 Coordinate pointer actions use randomized curved, eased trajectories and land exactly on the requested endpoint. This emulates ordinary pointer movement; it is not an anti-bot guarantee.
 

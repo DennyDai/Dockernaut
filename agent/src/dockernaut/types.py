@@ -11,6 +11,7 @@ class Capability(StrEnum):
     WINDOWS = "windows"
     BROWSER = "browser"
     VIEWER = "viewer"
+    APPLICATIONS = "applications"
 
 
 @dataclass(frozen=True, slots=True)

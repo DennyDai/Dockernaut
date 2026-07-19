@@ -35,6 +35,13 @@ def normalize(step: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         return action, {"keys": value}
     if action == "wait":
         return action, {"seconds": value}
+    if action == "launch":
+        return action, {"command": value} if isinstance(value, str) else dict(value)
+    if action in {
+        "assert_window", "close_window", "focus_window", "maximize_window",
+        "move_window", "resize_window", "restore_window", "wait_window",
+    }:
+        return action, {"title": value} if isinstance(value, str) else dict(value)
     if action in {"click_text", "click_element", "assert_text", "wait_text"}:
         return action, {"text": value} if isinstance(value, str) else dict(value)
     if action == "scroll":

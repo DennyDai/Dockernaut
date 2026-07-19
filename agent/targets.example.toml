@@ -1,7 +1,7 @@
 cache_dir = "~/.cache/dockernaut"
 
 [targets.desktop]
-prefer = ["vnc", "x11", "cdp"]
+prefer = ["x11", "vnc", "cdp"]
 
 [targets.desktop.ssh]
 host = "127.0.0.1"

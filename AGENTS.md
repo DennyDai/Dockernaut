@@ -18,7 +18,7 @@ Preserve these user requirements:
 - The host controller supports modular SSH, X11, VNC, CDP, RDP, and Android ADB adapters.
 - Capabilities, not target names, determine routing. External adapters load through the `dockernaut.adapters` entry-point group.
 - Screenshot and coordinate input must use a coherent session and coordinate space. Never silently act through an unrelated fallback surface.
-- Prefer CDP for browser semantics, SSH for shell semantics, and visual control only for graphical work.
+- Prefer CDP for browser semantics, SSH for shell semantics, and X11 application/window primitives for Linux desktop semantics. Use OCR and coordinate control only when those interfaces cannot express the operation; use VNC when X11 is unavailable.
 - Known action chains execute locally as one declarative sequence. Do not require one model/agent call per click.
 - Failed sequences stop immediately and return the failed step, completed steps, error, and a fresh observation when possible.
 - OCR text locators support repeated-label disambiguation with `region` and `nth`.
