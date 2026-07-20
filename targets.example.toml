@@ -1,0 +1,75 @@
+cache_dir = "~/.cache/wayweaver"
+
+[targets.desktop]
+prefer = ["x11", "vnc", "cdp"]
+
+[targets.desktop.ssh]
+host = "127.0.0.1"
+port = 2222
+user = "vm"
+password = "${VM_PASSWORD:-vm}"
+
+[targets.desktop.x11]
+transport = "ssh"
+display = ":1"
+
+[targets.desktop.atspi]
+transport = "ssh"
+display = ":1"
+
+[targets.desktop.vnc]
+host = "127.0.0.1"
+port = 5901
+password = "${VNC_PASSWORD:-vm}"
+
+[targets.desktop.cdp]
+url = "http://127.0.0.1:9222"
+scope = "page"
+
+# Optional native Linux host target. Install its OS dependencies, then run `wayweaver runtime install host --platform linux`.
+#[targets.host]
+#prefer = ["x11", "atspi", "local"]
+#
+#[targets.host.local]
+#kind = "local"
+#cwd = "."
+#
+#[targets.host.x11]
+#transport = "local"
+#display = "${DISPLAY:-:0}"
+#
+#[targets.host.atspi]
+#transport = "local"
+#display = "${DISPLAY:-:0}"
+
+# Optional native Windows target. Run the controller and runtime installer in
+# the signed-in desktop session.
+#[targets.windows]
+#prefer = ["uia", "local"]
+#
+#[targets.windows.local]
+#kind = "local"
+#
+#[targets.windows.uia]
+#transport = "local"
+#
+# Optional remote Windows framebuffer/input target; install with `uv sync --extra rdp`.
+#[targets.remote-windows.rdp]
+#url = "rdp+ntlm-password://DOMAIN\\user:password@host"
+#width = 1280
+#height = 720
+
+# Optional Android target. UIAutomator element semantics are detected
+# automatically; install adb and set a serial when several devices are attached.
+#[targets.android.adb]
+#serial = "emulator-5554"
+#scrcpy = "scrcpy"
+
+# Optional wlroots/Sway target. Operations appear only for tools found in the live Wayland session.
+#[targets.wayland.ssh]
+#host = "wayland-host"
+#user = "user"
+#
+#[targets.wayland.wayland]
+#transport = "ssh"
+#display = "wayland-1"

@@ -1,0 +1,471 @@
+import json
+import os
+import random
+import tempfile
+import unittest
+from pathlib import Path
+
+from wayweaver.adapters.x11 import X11Adapter
+from wayweaver.cli import load_json
+from wayweaver.errors import ActionError, ContractError
+from wayweaver.config import ConfigError, load_config
+from wayweaver.motion import trajectory
+from wayweaver.sequence import normalize, run_sequence
+from wayweaver.vision import Word, find_text
+
+
+class CliTests(unittest.TestCase):
+    def test_long_inline_json_is_not_treated_as_a_path(self):
+        payload = {"steps": [{"type": "x" * 300}]}
+        self.assertEqual(load_json(json.dumps(payload)), payload)
+
+
+class ConfigTests(unittest.TestCase):
+    def test_loads_targets_and_expands_environment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "targets.toml"
+            path.write_text('[targets.vm.ssh]\nhost="${TEST_HOST}"\n')
+            os.environ["TEST_HOST"] = "example.test"
+            config = load_config(path)
+            self.assertEqual(
+                config.target("vm").adapters["ssh"]["host"], "example.test"
+            )
+
+    def test_missing_environment_is_an_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "targets.toml"
+            path.write_text('[targets.vm.ssh]\nhost="${WAYWEAVER_MISSING_TEST}"\n')
+            with self.assertRaises(ConfigError):
+                load_config(path)
+
+    def test_rejects_scalar_adapter_configuration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "targets.toml"
+            path.write_text(
+                '[targets.vm]\ntypo="not-an-adapter-table"\n[targets.vm.ssh]\nhost="localhost"\n'
+            )
+            with self.assertRaises(ConfigError):
+                load_config(path)
+
+
+class MotionTests(unittest.TestCase):
+    def test_trajectory_ends_exactly_at_target(self):
+        points, duration = trajectory((10, 20), (500, 400), rng=random.Random(7))
+        self.assertGreater(duration, 0)
+        self.assertGreater(len(points), 8)
+        self.assertEqual(points[-1], (500, 400))
+        self.assertGreater(len(set(points)), 8)
+
+
+class VisionTests(unittest.TestCase):
+    def word(self, text, token, left, top, line="1"):
+        return Word(text, token, 95, left, top, 50, 20, ("1", "1", "1", line))
+
+    def test_region_disambiguates_visible_text(self):
+        words = [
+            self.word("Target", "target", 10, 10),
+            self.word("Target", "target", 700, 500, "2"),
+        ]
+        match = find_text(words, {"text": "target", "region": [600, 400, 900, 700]})
+        self.assertEqual(match["x"], 725)
+        self.assertEqual(match["matches"], 1)
+        self.assertEqual(match["total_matches"], 2)
+
+    def test_fuzzy_region_recovers_minor_ocr_error(self):
+        words = [
+            self.word("ferminal", "ferminal", 20, 40),
+            self.word("Emulator", "emulator", 80, 40),
+            self.word("Terminal", "terminal", 700, 500, "2"),
+            self.word("Emulator", "emulator", 760, 500, "2"),
+        ]
+        match = find_text(
+            words,
+            {
+                "text": "Terminal Emulator",
+                "region": [0, 0, 220, 180],
+                "fuzzy": True,
+            },
+        )
+        self.assertEqual(match["match"], "fuzzy")
+        self.assertEqual(match["matches"], 1)
+        self.assertEqual(match["total_matches"], 2)
+
+
+class FakeSSH:
+    def __init__(self):
+        self.commands = []
+
+    async def shell(self, command, stdin=None):
+        self.commands.append(command)
+        if "wayweaver-applications open" in command:
+            return (
+                0,
+                json.dumps(
+                    {
+                        "application": {
+                            "id": "xfce4-terminal.desktop",
+                            "name": "Xfce Terminal",
+                        },
+                        "matches": 1,
+                        "pid": 123,
+                    }
+                ).encode(),
+                b"",
+            )
+        if "wmctrl -lpGx" in command:
+            return (
+                0,
+                b"0x01000003 0 123 10 20 800 600 xfce4-terminal.Xfce4-terminal desktop-vm Terminal - vm@desktop-vm\\n",
+                b"",
+            )
+        if "wmctrl -d" in command:
+            return (
+                0,
+                b"0 * DG: 1600x900 VP: 0,0 WA: 0,0 1600x900 Main\n"
+                b"1 - DG: 1600x900 VP: 0,0 WA: 0,0 1600x900 Work\n",
+                b"",
+            )
+        if "xdotool getmouselocation --shell" in command:
+            return 0, b"X=700\nY=400\nSCREEN=0\nWINDOW=1\n", b""
+        if "xdotool getactivewindow" in command:
+            return 0, str(int("0x01000003", 16)).encode(), b""
+        return 0, b"", b""
+
+
+class X11Tests(unittest.IsolatedAsyncioTestCase):
+    async def test_opens_catalog_application_without_visual_search(self):
+        ssh = FakeSSH()
+        adapter = X11Adapter("x11", {"display": ":1"}, ssh)
+        result = await adapter.perform(
+            "application.open",
+            {"id": "xfce4-terminal.desktop"},
+        )
+        self.assertEqual(result["application"]["name"], "Xfce Terminal")
+        self.assertIn("wayweaver-applications open", ssh.commands[-1])
+
+    async def test_reads_live_pointer_before_every_trajectory(self):
+        ssh = FakeSSH()
+        adapter = X11Adapter("x11", {"display": ":1"}, ssh)
+        await adapter.act("move", {"x": 710, "y": 410, "duration_ms": 0})
+        self.assertIn("xdotool getmouselocation --shell", ssh.commands[-2])
+        self.assertIn("xdotool mousemove 710 410", ssh.commands[-1])
+
+    async def test_focuses_window_by_title(self):
+        ssh = FakeSSH()
+        adapter = X11Adapter("x11", {"display": ":1"}, ssh)
+        result = await adapter.act("focus_window", {"title": "terminal"})
+        self.assertTrue(result["window"]["active"])
+        self.assertIn("wmctrl -ia 0x01000003", ssh.commands[-1])
+
+    async def test_asserts_window_by_class_and_active_state(self):
+        adapter = X11Adapter("x11", {"display": ":1"}, FakeSSH())
+        result = await adapter.act(
+            "assert_window",
+            {"class": "xfce4-terminal", "active": True},
+        )
+        self.assertEqual(result["id"], "0x01000003")
+        self.assertEqual(result["matches"], 1)
+
+    async def test_optional_close_skips_missing_window(self):
+        adapter = X11Adapter("x11", {"display": ":1"}, FakeSSH())
+        result = await adapter.act(
+            "close_window", {"title": "Missing", "if_exists": True}
+        )
+        self.assertTrue(result["skipped"])
+
+    async def test_switches_workspace_by_name(self):
+        ssh = FakeSSH()
+        adapter = X11Adapter("x11", {"display": ":1"}, ssh)
+
+        result = await adapter.perform("workspace.switch", {"name": "Work"})
+
+        self.assertEqual(result, {"index": 1})
+        self.assertIn("wmctrl -s 1", ssh.commands[-1])
+
+    def test_recorder_prefers_accessible_elements_and_preserves_fallbacks(self):
+        output = """BUTTON_DOWN 1 1145 716 1200
+BUTTON_UP 1 1145 716 1234
+BUTTON_DOWN 3 20 30 1250
+BUTTON_UP 3 20 30 1300
+BUTTON_DOWN 4 30 40 1320
+BUTTON_UP 4 30 40 1330
+BUTTON_DOWN 1 10 10 1350
+BUTTON_UP 1 80 90 1450
+KEY_DOWN 37 Control_L 1500
+KEY_DOWN 38 a 1510
+KEY_UP 38 a 1550
+KEY_UP 37 Control_L 1560
+"""
+        events = X11Adapter._recorded_events(output)
+        elements = [
+            {
+                "name": "",
+                "role": "panel",
+                "bounds": {
+                    "left": 1050,
+                    "top": 700,
+                    "width": 200,
+                    "height": 40,
+                },
+            },
+            {
+                "name": "Continue without Signing In",
+                "role": "push button",
+                "resource_id": "continue",
+                "bounds": {
+                    "left": 1050,
+                    "top": 700,
+                    "width": 200,
+                    "height": 40,
+                },
+            },
+        ]
+
+        element = X11Adapter._element_at(elements, events[0]["x"], events[0]["y"])
+        recorded, semantic = X11Adapter._recording_step(events[0], element)
+        _, coordinate = X11Adapter._recording_step(events[1], None)
+        _, scroll = X11Adapter._recording_step(events[2], None)
+        _, drag = X11Adapter._recording_step(events[3], None)
+        _, chord = X11Adapter._recording_step(events[4], None)
+
+        self.assertTrue(recorded["semantic"])
+        self.assertEqual(semantic["operation"], "element.activate")
+        self.assertEqual(semantic["params"]["selector"]["resource_id"], "continue")
+        self.assertEqual(coordinate["operation"], "pointer.click")
+        self.assertEqual(coordinate["params"]["button"], "right")
+        self.assertEqual(scroll["operation"], "pointer.scroll")
+        self.assertEqual(scroll["params"]["direction"], "up")
+        self.assertEqual(drag["operation"], "pointer.drag")
+        self.assertEqual(drag["params"]["to"], {"x": 80, "y": 90})
+        self.assertEqual(chord["operation"], "keyboard.chord")
+        self.assertEqual(chord["params"]["keys"], ["CTRL", "a"])
+
+
+class FakeController:
+    def __init__(self, fail=None):
+        self.fail = fail
+        self.calls = []
+
+    async def perform(self, target, action, params):
+        self.calls.append((target, action, params))
+        if action == self.fail:
+            raise RuntimeError("expected failure")
+        return {"action": action}
+
+    async def observe(self, target, ocr):
+        return {"target": target, "ocr": "failure state"}
+
+
+class WorkflowController:
+    def __init__(self):
+        self.calls = []
+        self.pointer_failures = 1
+
+    async def perform(self, target, operation, params):
+        self.calls.append((target, operation, params))
+        if operation == "pointer.move" and self.pointer_failures:
+            self.pointer_failures -= 1
+            raise ActionError("transient")
+        data = (
+            {
+                "observation_id": "obs-1",
+                "surface": {"id": "surface-1"},
+            }
+            if operation == "screen.observe"
+            else params
+        )
+        return {"ok": True, "operation": operation, "data": data}
+
+    async def observe(self, target, ocr):
+        return {"target": target}
+
+
+class SequenceTests(unittest.IsolatedAsyncioTestCase):
+    def test_normalizes_explicit_and_compact_steps(self):
+        self.assertEqual(
+            normalize(
+                {
+                    "operation": "pointer.click",
+                    "params": {
+                        "point": {"x": 1, "y": 2},
+                        "space": "screen",
+                    },
+                }
+            ),
+            ("pointer.click", {"point": {"x": 1, "y": 2}, "space": "screen"}),
+        )
+        self.assertEqual(
+            normalize({"pointer.scroll": "down"}),
+            ("pointer.scroll", {"direction": "down", "space": "screen"}),
+        )
+        self.assertEqual(
+            normalize({"application.open": "Xfce Terminal"}),
+            ("application.open", {"selector": {"name": "Xfce Terminal"}}),
+        )
+        self.assertEqual(
+            normalize({"window.wait": "Terminal"}),
+            ("window.wait", {"selector": {"title": "Terminal"}}),
+        )
+        with self.assertRaisesRegex(ValueError, "unknown operation"):
+            normalize({"click": [1, 2]})
+
+    async def test_runs_steps_without_agent_round_trips(self):
+        controller = FakeController()
+        result = await run_sequence(
+            controller,
+            "vm",
+            [
+                {"pointer.click": [10, 20]},
+                {"keyboard.type": "hello"},
+                {"keyboard.press": "ENTER"},
+            ],
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(
+            [call[1] for call in controller.calls],
+            ["pointer.click", "keyboard.type", "keyboard.press"],
+        )
+
+    async def test_failure_returns_completed_steps_and_observation(self):
+        controller = FakeController("keyboard.type")
+        result = await run_sequence(
+            controller,
+            "vm",
+            [
+                {"pointer.click": [10, 20]},
+                {"keyboard.type": "hello"},
+                {"keyboard.press": "ENTER"},
+            ],
+        )
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["failed_step"], 1)
+        self.assertEqual(len(result["completed"]), 1)
+        self.assertEqual(result["observation"]["ocr"], "failure state")
+
+    async def test_resolves_saved_values_retries_repeats_and_conditions(self):
+        controller = WorkflowController()
+        result = await run_sequence(
+            controller,
+            "vm",
+            [
+                {
+                    "id": "observe",
+                    "operation": "screen.observe",
+                    "params": {},
+                    "save_as": "observation",
+                },
+                {
+                    "id": "move",
+                    "operation": "pointer.move",
+                    "params": {
+                        "point": {"x": 10, "y": 20},
+                        "space": "surface",
+                        "surface_id": {"$ref": "observation.data.surface.id"},
+                        "observation_id": {"$ref": "observation.data.observation_id"},
+                    },
+                    "retry": {"max_attempts": 2, "backoff_ms": 0},
+                    "repeat": 2,
+                    "save_as": "moves",
+                },
+                {
+                    "operation": "keyboard.press",
+                    "params": {"key": "ENTER"},
+                    "when": {"ref": "moves.0.ok", "equals": True},
+                },
+                {
+                    "operation": "time.sleep",
+                    "params": {"duration_ms": 1},
+                    "when": {"ref": "moves.0.ok", "equals": False},
+                },
+            ],
+        )
+
+        self.assertTrue(result["ok"])
+        pointer_calls = [
+            params
+            for _, operation, params in controller.calls
+            if operation == "pointer.move"
+        ]
+        self.assertEqual(len(pointer_calls), 3)
+        self.assertEqual(pointer_calls[0]["surface_id"], "surface-1")
+        self.assertEqual(result["completed"][1]["attempts"], 2)
+        self.assertEqual(result["completed"][-1]["skipped"], True)
+        self.assertEqual(len(result["saved"]["moves"]), 2)
+
+    async def test_retry_skips_non_retryable_and_filtered_errors(self):
+        class FailingController:
+            def __init__(self, error):
+                self.error = error
+                self.calls = 0
+
+            async def perform(self, target, operation, params):
+                self.calls += 1
+                raise self.error
+
+            async def observe(self, target, ocr):
+                return {"target": target}
+
+        invalid = FailingController(ContractError("bad params"))
+        invalid_result = await run_sequence(
+            invalid,
+            "vm",
+            [
+                {
+                    "operation": "keyboard.press",
+                    "params": {"key": "ENTER"},
+                    "retry": {"max_attempts": 3},
+                }
+            ],
+            on_error="stop",
+        )
+        filtered = FailingController(ActionError("transient"))
+        filtered_result = await run_sequence(
+            filtered,
+            "vm",
+            [
+                {
+                    "operation": "keyboard.press",
+                    "params": {"key": "ENTER"},
+                    "retry": {
+                        "max_attempts": 3,
+                        "on_codes": ["PROTOCOL_ERROR"],
+                    },
+                }
+            ],
+            on_error="stop",
+        )
+
+        self.assertFalse(invalid_result["ok"])
+        self.assertEqual(invalid.calls, 1)
+        self.assertEqual(invalid_result["failure"]["attempts"], 1)
+        self.assertFalse(filtered_result["ok"])
+        self.assertEqual(filtered.calls, 1)
+
+    async def test_bounds_saved_results_without_breaking_internal_references(self):
+        controller = WorkflowController()
+        result = await run_sequence(
+            controller,
+            "vm",
+            [
+                {
+                    "operation": "keyboard.type",
+                    "params": {"text": "x" * 10_000},
+                    "save_as": "large",
+                },
+                {
+                    "operation": "keyboard.press",
+                    "params": {"key": "ENTER"},
+                    "when": {"ref": "large.ok", "equals": True},
+                },
+            ],
+            saved_output_limit=256,
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["saved"]["large"]["truncated"])
+        self.assertGreater(result["saved"]["large"]["bytes"], 10_000)
+        self.assertEqual(len(controller.calls), 2)
+
+
+if __name__ == "__main__":
+    unittest.main()

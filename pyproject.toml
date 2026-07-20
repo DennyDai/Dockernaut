@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wayweaver-agent"
+dynamic = ["version"]
+description = "Capability-routed control for browsers, desktops, shells, and devices"
+requires-python = ">=3.11"
+dependencies = ["jsonschema>=4.23,<5", "mcp>=1.10,<2"]
+
+[project.optional-dependencies]
+rdp = ["aardwolf==0.2.13"]
+
+[project.scripts]
+wayweaver = "wayweaver.cli:main"
+wayweaver-mcp = "wayweaver.mcp_server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+
+[tool.setuptools.dynamic]
+version = { attr = "wayweaver._version.__version__" }
+
+
+[tool.setuptools.package-data]
+"wayweaver.runtime" = [
+    "assets/linux/*",
+    "assets/windows/*",
+    "assets/gnome/wayweaver@wayweaver.local/*",
+]

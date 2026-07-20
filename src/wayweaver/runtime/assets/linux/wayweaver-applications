@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+import configparser
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+from pathlib import Path
+
+
+def applications():
+    roots = [Path("/usr/share/applications"), Path.home() / ".local/share/applications"]
+    found = {}
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for path in sorted(root.glob("*.desktop")):
+            parser = configparser.ConfigParser(interpolation=None, strict=False)
+            parser.optionxform = str
+            try:
+                parser.read(path, encoding="utf-8")
+                entry = parser["Desktop Entry"]
+            except (KeyError, configparser.Error, OSError, UnicodeError):
+                continue
+            if entry.get("Type") != "Application" or entry.getboolean("Hidden", fallback=False):
+                continue
+            if entry.getboolean("NoDisplay", fallback=False):
+                continue
+            command = entry.get("Exec", "").strip()
+            if not command:
+                continue
+            identifier = path.name
+            found[identifier] = {
+                "id": identifier,
+                "name": entry.get("Name", path.stem),
+                "generic_name": entry.get("GenericName", ""),
+                "command": command,
+                "icon": entry.get("Icon", ""),
+                "categories": [value for value in entry.get("Categories", "").split(";") if value],
+                "terminal": entry.getboolean("Terminal", fallback=False),
+            }
+    return sorted(found.values(), key=lambda item: (item["name"].casefold(), item["id"]))
+
+
+def select(items, options):
+    identifier = options.get("id")
+    name = options.get("name")
+    if identifier:
+        matches = [item for item in items if item["id"].casefold() == str(identifier).casefold()]
+    elif name:
+        wanted = str(name).casefold()
+        exact = [item for item in items if item["name"].casefold() == wanted]
+        matches = exact or [item for item in items if wanted in item["name"].casefold()]
+    else:
+        raise ValueError("application.open requires id or name")
+    nth = int(options.get("nth", 0))
+    nth = nth if nth >= 0 else len(matches) + nth
+    if not 0 <= nth < len(matches):
+        raise ValueError(f"application not found: {identifier or name!r}")
+    return matches[nth], len(matches)
+
+
+def argv(command):
+    marker = "\0PERCENT\0"
+    command = command.replace("%%", marker)
+    command = re.sub(r"%[fFuUdDnNickvm]", "", command).replace(marker, "%")
+    return shlex.split(command)
+
+
+def main():
+    action = sys.argv[1] if len(sys.argv) > 1 else "list"
+    items = applications()
+    if action == "list":
+        print(json.dumps(items))
+        return
+    if action != "open":
+        raise ValueError(f"unknown action: {action}")
+    options = json.load(sys.stdin)
+    item, matches = select(items, options)
+    arguments = argv(item["command"])
+    if item["terminal"]:
+        arguments = [os.environ.get("TERMINAL", "xfce4-terminal"), "--execute", *arguments]
+    process = subprocess.Popen(
+        arguments,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    print(json.dumps({"application": item, "matches": matches, "pid": process.pid}))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as error:
+        print(json.dumps({"error": str(error)}), file=sys.stderr)
+        raise SystemExit(1)

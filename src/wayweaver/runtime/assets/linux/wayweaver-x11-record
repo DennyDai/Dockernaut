@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+import sys
+import time
+
+from Xlib import X, XK, display
+
+
+BUTTON_MASKS = {
+    1: X.Button1Mask,
+    2: X.Button2Mask,
+    3: X.Button3Mask,
+    4: X.Button4Mask,
+    5: X.Button5Mask,
+}
+
+
+def pressed_buttons(mask: int) -> set[int]:
+    return {button for button, bit in BUTTON_MASKS.items() if mask & bit}
+
+
+def pressed_keys(connection) -> set[int]:
+    keymap = connection.query_keymap()
+    return {
+        byte_index * 8 + bit_index
+        for byte_index, value in enumerate(keymap)
+        for bit_index in range(8)
+        if value & (1 << bit_index)
+    }
+
+
+def key_name(connection, keycode: int) -> str:
+    keysym = connection.keycode_to_keysym(keycode, 0)
+    return XK.keysym_to_string(keysym) or f"keycode-{keycode}"
+
+
+def emit(kind: str, *values: object) -> None:
+    print(kind, *values, time.time_ns() // 1_000_000, flush=True)
+
+
+def main() -> None:
+    connection = display.Display()
+    root = connection.screen().root
+    pointer = root.query_pointer()
+    previous_buttons = pressed_buttons(pointer.mask)
+    previous_keys = pressed_keys(connection)
+    try:
+        while True:
+            pointer = root.query_pointer()
+            current_buttons = pressed_buttons(pointer.mask)
+            for button in current_buttons - previous_buttons:
+                emit("BUTTON_DOWN", button, pointer.root_x, pointer.root_y)
+            for button in previous_buttons - current_buttons:
+                emit("BUTTON_UP", button, pointer.root_x, pointer.root_y)
+            previous_buttons = current_buttons
+
+            current_keys = pressed_keys(connection)
+            for keycode in current_keys - previous_keys:
+                emit("KEY_DOWN", keycode, key_name(connection, keycode))
+            for keycode in previous_keys - current_keys:
+                emit("KEY_UP", keycode, key_name(connection, keycode))
+            previous_keys = current_keys
+            time.sleep(0.01)
+    finally:
+        connection.close()
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as error:
+        print(str(error), file=sys.stderr)
+        raise SystemExit(1)

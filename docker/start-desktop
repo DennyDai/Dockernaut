@@ -4,6 +4,7 @@ set -euo pipefail
 export DISPLAY="${DISPLAY:-:1}"
 export HOME="${HOME:-/home/vm}"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+export NO_AT_BRIDGE="${NO_AT_BRIDGE:-0}"
 
 until [[ -S /tmp/.X11-unix/X1 ]]; do
   sleep 0.2

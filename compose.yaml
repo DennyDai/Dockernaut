@@ -2,7 +2,8 @@ services:
   desktop-vm:
     platform: linux/amd64
     build:
-      context: ./docker
+      context: .
+      dockerfile: docker/Dockerfile
       args:
         VM_UID: ${VM_UID:-1000}
         VM_GID: ${VM_GID:-1000}
@@ -20,4 +21,8 @@ services:
       - "${BIND_ADDR:-127.0.0.1}:${CDP_PORT:-9222}:9222"
     volumes:
       - "${VM_HOME:-./homes/default}:/home/vm"
+      - ssh-host-keys:/etc/ssh/wayweaver
     restart: unless-stopped
+
+volumes:
+  ssh-host-keys:

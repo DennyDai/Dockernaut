@@ -14,6 +14,7 @@ RUN if [[ "${TARGETARCH}" != "amd64" ]]; then \
  && apt-get update \
  && apt-get install -y --no-install-recommends \
       adwaita-icon-theme \
+      at-spi2-core \
       build-essential \
       ca-certificates \
       curl \
@@ -31,6 +32,8 @@ RUN if [[ "${TARGETARCH}" != "amd64" ]]; then \
       procps \
       python3 \
       python3-pip \
+      python3-pyatspi \
+      python3-xlib \
       socat \
       sudo \
       supervisor \
@@ -69,34 +72,38 @@ RUN groupmod --new-name vm ubuntu \
  && chmod 0440 /etc/sudoers.d/vm \
  && install -d -m 0755 /run/sshd \
  && printf '%s\n' \
+      'HostKey /etc/ssh/wayweaver/ssh_host_ed25519_key' \
+      'HostKey /etc/ssh/wayweaver/ssh_host_rsa_key' \
       'PasswordAuthentication yes' \
       'PermitRootLogin no' \
       'X11Forwarding no' \
       'AllowTcpForwarding yes' \
       >/etc/ssh/sshd_config.d/desktop-vm.conf
 
-COPY chrome /usr/local/bin/chrome
-COPY start-desktop /usr/local/bin/start-desktop
-COPY start-chrome /usr/local/bin/start-chrome
-COPY guest-tools/ /usr/local/bin/
-COPY entrypoint /usr/local/bin/desktop-vm-entrypoint
-COPY supervisord.conf /etc/supervisor/conf.d/desktop-vm.conf
-COPY desktop-env.sh /etc/profile.d/desktop-env.sh
+COPY docker/chrome /usr/local/bin/chrome
+COPY docker/start-desktop /usr/local/bin/start-desktop
+COPY docker/start-chrome /usr/local/bin/start-chrome
+COPY src/wayweaver/_version.py /tmp/wayweaver-version.py
+COPY src/wayweaver/runtime/assets/linux/ /tmp/wayweaver-runtime/
+COPY docker/entrypoint /usr/local/bin/desktop-vm-entrypoint
+COPY docker/supervisord.conf /etc/supervisor/conf.d/desktop-vm.conf
+COPY docker/desktop-env.sh /etc/profile.d/desktop-env.sh
 
-RUN chmod 0755 \
+RUN version="$(python3 -c 'scope={}; exec(open("/tmp/wayweaver-version.py").read(), scope); print(scope["__version__"])')" \
+ && runtime="/opt/wayweaver/runtime/${version}/bin" \
+ && install -d -m 0755 "${runtime}" \
+ && install -m 0755 /tmp/wayweaver-runtime/wayweaver-applications "${runtime}/wayweaver-applications" \
+ && install -m 0755 /tmp/wayweaver-runtime/wayweaver-atspi "${runtime}/wayweaver-atspi" \
+ && install -m 0755 /tmp/wayweaver-runtime/wayweaver-clipboard "${runtime}/wayweaver-clipboard" \
+ && install -m 0755 /tmp/wayweaver-runtime/wayweaver-x11-record "${runtime}/wayweaver-x11-record" \
+ && ln -s "${runtime}/wayweaver-applications" /usr/local/bin/wayweaver-applications \
+ && ln -s "${runtime}/wayweaver-atspi" /usr/local/bin/wayweaver-atspi \
+ && ln -s "${runtime}/wayweaver-clipboard" /usr/local/bin/wayweaver-clipboard \
+ && ln -s "${runtime}/wayweaver-x11-record" /usr/local/bin/wayweaver-x11-record \
+ && rm -rf /tmp/wayweaver-runtime /tmp/wayweaver-version.py \
+ && chmod 0755 \
       /usr/local/bin/chrome \
       /usr/local/bin/start-desktop \
-      /usr/local/bin/desktop-screenshot \
-      /usr/local/bin/desktop-ocr \
-      /usr/local/bin/agent-screenshot \
-      /usr/local/bin/agent-clear-screenshots \
-      /usr/local/bin/agent-observe \
-      /usr/local/bin/agent-click \
-      /usr/local/bin/agent-mouse \
-      /usr/local/bin/agent-run \
-      /usr/local/bin/agent-type \
-      /usr/local/bin/agent-key \
-      /usr/local/bin/agent-clear \
       /usr/local/bin/start-chrome \
       /usr/local/bin/desktop-vm-entrypoint \
       /etc/profile.d/desktop-env.sh

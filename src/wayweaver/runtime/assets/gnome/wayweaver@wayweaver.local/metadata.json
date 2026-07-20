@@ -1,0 +1,6 @@
+{
+  "uuid": "wayweaver@wayweaver.local",
+  "name": "Wayweaver Native Window Bridge",
+  "description": "Capability-gated GNOME Shell window and workspace control for Wayweaver",
+  "shell-version": ["45", "46", "47", "48", "49", "50"]
+}

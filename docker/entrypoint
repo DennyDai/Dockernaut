@@ -9,7 +9,15 @@ VM_GID="$(id -g vm)"
 VM_RUNTIME_DIR="/run/user/${VM_UID}"
 
 printf 'vm:%s\n' "${VM_PASSWORD}" | chpasswd
-ssh-keygen -A
+install -d -m 0700 /etc/ssh/wayweaver
+if [[ ! -f /etc/ssh/wayweaver/ssh_host_ed25519_key ]]; then
+  ssh-keygen -q -t ed25519 -N '' -f /etc/ssh/wayweaver/ssh_host_ed25519_key
+fi
+if [[ ! -f /etc/ssh/wayweaver/ssh_host_rsa_key ]]; then
+  ssh-keygen -q -t rsa -b 3072 -N '' -f /etc/ssh/wayweaver/ssh_host_rsa_key
+fi
+chmod 0600 /etc/ssh/wayweaver/ssh_host_ed25519_key /etc/ssh/wayweaver/ssh_host_rsa_key
+chmod 0644 /etc/ssh/wayweaver/ssh_host_ed25519_key.pub /etc/ssh/wayweaver/ssh_host_rsa_key.pub
 
 install -d -o "${VM_UID}" -g "${VM_GID}" -m 0755 /home/vm
 install -d -o "${VM_UID}" -g "${VM_GID}" -m 0700 /home/vm/.vnc

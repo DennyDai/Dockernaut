@@ -10,6 +10,7 @@ exec /usr/bin/google-chrome-stable \
   --remote-debugging-address="${CHROME_REMOTE_DEBUGGING_ADDRESS:-0.0.0.0}" \
   --remote-debugging-port="${CHROME_REMOTE_DEBUGGING_PORT:-9223}" \
   --remote-allow-origins="*" \
+  --force-renderer-accessibility \
   --no-sandbox \
   --no-first-run \
   --no-default-browser-check \

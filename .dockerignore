@@ -1,0 +1,10 @@
+*
+!docker/
+!docker/**
+!src/
+!src/wayweaver/
+!src/wayweaver/_version.py
+!src/wayweaver/runtime/
+!src/wayweaver/runtime/assets/
+!src/wayweaver/runtime/assets/linux/
+!src/wayweaver/runtime/assets/linux/*
